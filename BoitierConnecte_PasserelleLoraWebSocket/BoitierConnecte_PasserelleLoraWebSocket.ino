@@ -57,23 +57,23 @@ void loop()
 
 void LoraLoop()
 {
-  int packetSize = LoRa.parsePacket();
-  if (packetSize) {
-      // received a packet
+  if (LoRa.parsePacket()) {
+    JsonDocument receiveLoraJson;
+
       Serial.print("Received packet :");
       String res ="";
       while (LoRa.available()) {
           res +=(char)LoRa.read();
       }
-    JsonDocument receiveLoraJson;
+    
     DeserializationError error = deserializeJson(receiveLoraJson, res);
     if (!error) {
       if(receiveLoraJson["id_dest"] =="serveur")
-      receiveLoraJson["id_passerelle"]=identifiant_passerelle;
-      sendWebSocketMessage(receiveLoraJson);
-    
+        {
+          receiveLoraJson["id_passerelle"]=identifiant_passerelle;
+          sendWebSocketMessage(receiveLoraJson);        
+        }
     }else{Serial.println("Erreur Lors de la deserialisation");} 
-
   }
 }
 
@@ -160,14 +160,11 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     DeserializationError error = deserializeJson(jsonSend, msg);
 
     if (!error && startsWithId(jsonSend.as<JsonObject>(), "id_dest", "bt_")) {
-      String tmp=jsonSend["id_dest"].as<String>() + ",";
-      jsonSend.remove("id_dest");
-      serializeJson(jsonSend, jsonString);
-      tmp+=jsonString;
+
       LoRa.beginPacket();
-      LoRa.print(tmp);
+      LoRa.print(msg);
       LoRa.endPacket();
-      Serial.println(tmp);
+      Serial.println(msg);
     }
   }
 
