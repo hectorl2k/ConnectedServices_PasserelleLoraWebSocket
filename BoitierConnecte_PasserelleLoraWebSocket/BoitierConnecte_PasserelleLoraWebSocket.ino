@@ -47,6 +47,7 @@ void loop()
 {
   LoraLoop();
   webSocket.loop();
+  sendSerialToLora();
 
 
 
@@ -58,6 +59,7 @@ void loop()
 void LoraLoop()
 {
   if (LoRa.parsePacket()) {
+    
     JsonDocument receiveLoraJson;
 
       Serial.print("Received packet :");
@@ -65,7 +67,7 @@ void LoraLoop()
       while (LoRa.available()) {
           res +=(char)LoRa.read();
       }
-    
+    Serial.println(res);
     DeserializationError error = deserializeJson(receiveLoraJson, res);
     if (!error) {
       if(receiveLoraJson["id_dest"] =="serveur")
@@ -124,7 +126,7 @@ void sendWebSocketMessage(JsonDocument msg)
 {
   String jsonString;
   serializeJson(msg, jsonString);
-   Serial.println(jsonString);
+  Serial.println(jsonString);
   webSocket.sendTXT(jsonString);
 }
 
@@ -155,16 +157,16 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   void sendBoitier(String msg)
   {
     JsonDocument jsonSend;
+    Serial.println(msg);
     
     String jsonString="";
     DeserializationError error = deserializeJson(jsonSend, msg);
 
     if (!error && startsWithId(jsonSend.as<JsonObject>(), "id_dest", "bt_")) {
-
       LoRa.beginPacket();
       LoRa.print(msg);
       LoRa.endPacket();
-      Serial.println(msg);
+      
     }
   }
 
@@ -176,4 +178,21 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
         return strncmp(value, prefix, strlen(prefix)) == 0;
     }
     return false;
+}
+
+
+
+void sendSerialToLora() {
+  String message = ""; // Variable pour stocker le message reçu
+  
+  while (Serial.available()) {
+    char c = Serial.read(); // Lire le prochain caractère du port série
+    
+    if (c != '\n') {
+      message += c; // Ajouter le caractère au message
+    } else {
+      sendBoitier(message);
+      message = "";
+    }
+  }
 }
