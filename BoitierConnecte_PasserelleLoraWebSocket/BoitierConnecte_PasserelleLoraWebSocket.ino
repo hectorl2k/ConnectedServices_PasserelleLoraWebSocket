@@ -3,23 +3,35 @@
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
+#include <mySD.h>
 
 
+/*            SD            */
+ext::File myFile;
+const int chipSelect = 13; // Pin CS pour la carte SD
+const char* fichierSD="save.txt";
+const int pinMOSI = 15;    // Broche MOSI
+const int pinMISO = 2;    // Broche MISO
+const int pinSCK = 14;     // Broche SCK
+bool isSDConnected = false;
+bool isdataInBufferSD =false;
+
+
+
+/*          WIFI            */
 const char* ssid = "WIFI_DIGITAL";		
 const char* password =  "AMP_Digital";
 
 
+/*        WEB Socket            */
 const char* websocket_server = "10.0.0.53";
 const uint16_t websocket_port = 8003;
 WebSocketsClient webSocket;
 bool isWebSocketConnected = false;
 
+
+/*            LORA             */
 String identifiant_passerelle = "PasserelleLora_1";
-
-
- 
-
-
 #define LORA_BAND    868
 #define SCK     5    // GPIO5  -- SX1278's SCK
 #define MISO    19   // GPIO19 -- SX1278's MISO
@@ -39,20 +51,19 @@ void setup()
   setupWifi();
   setupLora();
   setupWebSocket();
+  isSDConnected=setupSD();
 
 
 }
 
 void loop()
 {
-  LoraLoop();
-  webSocket.loop();
-  sendSerialToLora();
+  LoraLoop();                     // Ecoute Lora et envoie en WebSocket si message ou ecris sur carte SD
+  webSocket.loop();               // Ecoute Message WebSocket
+  SD_CleanBuffer();               // Check si info dans la carte SD, si oui on vide
 
-
-
-    // try to parse packet
-  
+  sendSerialToLora();             // Ecoute port série et envoie en Lora
+   
 }
 
 
@@ -80,10 +91,8 @@ void LoraLoop()
 }
 
 
-
 void setupWifi()
 {
-
   WiFi.begin(ssid, password);
   Serial.println("Connecting");
   while(WiFi.status() != WL_CONNECTED) {										// verification de la connection WIFI
@@ -94,6 +103,11 @@ void setupWifi()
   Serial.println(WiFi.localIP());
 }
 
+
+bool setupSD()
+{
+  return (SD.begin(13, 15, 2, 14));
+}
 
 void setupLora()
 {
@@ -107,8 +121,6 @@ void setupLora()
 }
 
 
-
-
 void setupWebSocket()
 {
   webSocket.setAuthorization("sanofi", "sanofi");
@@ -116,10 +128,10 @@ void setupWebSocket()
   webSocket.onEvent(onWebSocketEvent);
   webSocket.setReconnectInterval(5000);
 
-  while (!isWebSocketConnected) {
-    webSocket.loop();
-  }
-  Serial.println("WebSocket connected.");
+  if(isWebSocketConnected)
+    {
+      Serial.println("WebSocket connected.");
+    }
 }
 
 void sendWebSocketMessage(JsonDocument msg)
@@ -127,7 +139,25 @@ void sendWebSocketMessage(JsonDocument msg)
   String jsonString;
   serializeJson(msg, jsonString);
   Serial.println(jsonString);
-  webSocket.sendTXT(jsonString);
+  if(isWebSocketConnected)            // Si Connecté --> Envoi WebSockset
+  {
+    webSocket.sendTXT(jsonString);
+  }else if(isSDConnected){            // Sinon on verifie si on peux sauvegardé SD
+    writeSD(jsonString);
+    isdataInBufferSD=true;
+  }else{                      
+    isSDConnected=setupSD();
+    if(isSDConnected)                // Reesaye de se reconnecter a SD
+    {
+      writeSD(jsonString);
+      isdataInBufferSD=true;
+
+    }else{
+                              //ATTENTION IL FAUT ECRIRE LE CODE POUR RENVOYER EN LOrA LA PERtE dE DONNee
+    }
+
+  }
+  
 }
 
 void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
@@ -142,7 +172,6 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
       isWebSocketConnected = true; // Mettre à true lors de la connexion
       break;
     case WStype_TEXT:
-     
       Serial.printf("Received message: %s\n", payload);
       sendBoitier(String(reinterpret_cast<char*>(payload)));
       break;
@@ -166,7 +195,6 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
       LoRa.beginPacket();
       LoRa.print(msg);
       LoRa.endPacket();
-      
     }
   }
 
@@ -180,7 +208,7 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     return false;
 }
 
-
+ 
 
 void sendSerialToLora() {
   String message = ""; // Variable pour stocker le message reçu
@@ -195,4 +223,88 @@ void sendSerialToLora() {
       message = "";
     }
   }
+}
+
+
+void SD_CleanBuffer()         // A finir
+{
+  if (isdataInBufferSD && isWebSocketConnected)
+  {
+    do{
+
+    }while()
+  }
+
+
+
+}
+
+
+
+bool writeSD(const char* filename, const String msg) {
+  
+  myFile = SD.open(filename, FILE_WRITE); // F_APPEND
+  if (myFile) {
+    myFile.println(msg);
+    myFile.close();
+    Serial.println("Message écrit sur la carte SD");
+    return true;
+  } 
+  return false;
+}
+
+
+String readSD(const char* filename, int readRow, bool readAndDelete) {
+  // Ouverture du fichier en mode lecture
+  myFile = SD.open(filename);
+  String result = "";
+  String elseCara="";
+
+  // Vérification si le fichier est ouvert avec succès
+  if (myFile) {
+    // Si readRow vaut 0 ou -1, lire tout le fichier
+    if (readRow == 0 || readRow == -1) {
+      while (myFile.available()) {
+        result += myFile.readStringUntil('\n');
+        result += "\n";
+      }
+      result.remove(result.length() - 1);
+      myFile.close();
+  }else {
+    int i=0;
+    while (myFile.available())
+    {  
+      i++;
+      if(i==readRow)
+      {
+        result += myFile.readStringUntil('\n');  
+      }else{
+        elseCara += myFile.readStringUntil('\n'); 
+        elseCara += "\n";
+      }
+    }
+    if (elseCara.length() > 0 && elseCara[elseCara.length() - 1] == '\n') {
+        elseCara.remove(elseCara.length() - 1);
+    }
+  }
+  myFile.close();
+  } else {
+    return "";
+  }
+
+  if(readAndDelete)
+  {
+    if( elseCara.length() > 0)
+    {
+      SD.remove(const_cast<char*>(filename));
+      ext::File tempFile = SD.open(filename, FILE_WRITE);
+      if (tempFile) {
+       tempFile.println(elseCara);
+       tempFile.close();
+      }
+    }else{
+      SD.remove(const_cast<char*>(filename));
+    }
+  }
+  return result;
 }
