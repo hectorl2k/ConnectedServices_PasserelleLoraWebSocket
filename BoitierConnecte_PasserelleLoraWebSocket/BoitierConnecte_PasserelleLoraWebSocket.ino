@@ -4,17 +4,19 @@
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 #include <mySD.h>
+#include <elapsedMillis.h>
 
 
 /*            SD            */
 ext::File myFile;
 const int chipSelect = 13; // Pin CS pour la carte SD
-const char* fichierSD="save.txt";
+const char* fichierSD="SaveLora.txt";
 const int pinMOSI = 15;    // Broche MOSI
 const int pinMISO = 2;    // Broche MISO
 const int pinSCK = 14;     // Broche SCK
 bool isSDConnected = false;
 bool isdataInBufferSD =false;
+elapsedMillis timout_SD;
 
 
 
@@ -41,6 +43,8 @@ String identifiant_passerelle = "PasserelleLora_1";
 #define DI0     26   // GPIO26 -- SX1278's IRQ(Interrupt Request)
 
 
+String readSD( bool readAndDelete=false,int readRow=1,const char* filename=fichierSD);
+bool writeSD(const String msg,const char* filename=fichierSD);
 
 
 void setup()
@@ -51,7 +55,7 @@ void setup()
   setupWifi();
   setupLora();
   setupWebSocket();
-  isSDConnected=setupSD();
+  setupSD();
 
 
 }
@@ -69,15 +73,15 @@ void loop()
 
 void LoraLoop()
 {
+
   if (LoRa.parsePacket()) {
     
     JsonDocument receiveLoraJson;
-
-      Serial.print("Received packet :");
-      String res ="";
-      while (LoRa.available()) {
+    Serial.print("Received packet :");
+    String res ="";
+    while (LoRa.available()) {
           res +=(char)LoRa.read();
-      }
+    }
     Serial.println(res);
     DeserializationError error = deserializeJson(receiveLoraJson, res);
     if (!error) {
@@ -106,7 +110,20 @@ void setupWifi()
 
 bool setupSD()
 {
-  return (SD.begin(13, 15, 2, 14));
+  bool res = SD.begin(chipSelect, pinMOSI, pinMISO, pinSCK);
+   delay(10);
+  if(res)
+  {
+
+    if(String(readSD(false,1)) != String("") )
+      {isdataInBufferSD=true;}
+
+    Serial.println("Lecteur SD OK");
+  }else{
+    Serial.println("Lecteur SD NAN");
+  }
+  isSDConnected=res;
+  return res;
 }
 
 void setupLora()
@@ -142,20 +159,14 @@ void sendWebSocketMessage(JsonDocument msg)
   if(isWebSocketConnected)            // Si Connecté --> Envoi WebSockset
   {
     webSocket.sendTXT(jsonString);
-  }else if(isSDConnected){            // Sinon on verifie si on peux sauvegardé SD
-    writeSD(jsonString);
-    isdataInBufferSD=true;
-  }else{                      
-    isSDConnected=setupSD();
+  }else{                     
     if(isSDConnected)                // Reesaye de se reconnecter a SD
     {
       writeSD(jsonString);
       isdataInBufferSD=true;
-
     }else{
                               //ATTENTION IL FAUT ECRIRE LE CODE POUR RENVOYER EN LOrA LA PERtE dE DONNee
     }
-
   }
   
 }
@@ -164,7 +175,7 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
     case WStype_DISCONNECTED:
       Serial.println("Disconnected from WebSocket.");
-      delay(5000);
+      delay(100);
       isWebSocketConnected = false; // Mettre à false en cas de déconnexion
       break;
     case WStype_CONNECTED:
@@ -228,20 +239,45 @@ void sendSerialToLora() {
 
 void SD_CleanBuffer()         // A finir
 {
-  if (isdataInBufferSD && isWebSocketConnected)
+  if(timout_SD>5000)
   {
-    do{
+    if(isSDConnected)
+    {
+      isSDConnected=checkSD();
+      
 
-    }while()
+    }else{
+      SD.end();
+      setupSD();
+    }
+    timout_SD=0;
+    
   }
-
-
-
+  if (isdataInBufferSD && isWebSocketConnected && isSDConnected)
+  {
+    Serial.println("On vide carte SD");
+    do{
+      JsonDocument jsonSend;
+      String buffer=readSD(true,1);
+      if(buffer =="")
+      {
+        isdataInBufferSD =false;
+      }else{
+        DeserializationError error = deserializeJson(jsonSend, buffer);
+        if(!error)
+        {
+          sendWebSocketMessage(jsonSend);  
+        }else{
+          writeSD(buffer);
+        }
+      }
+    }while(isdataInBufferSD || !isWebSocketConnected || !isdataInBufferSD);
+  }
 }
 
 
 
-bool writeSD(const char* filename, const String msg) {
+bool writeSD(const String msg,const char* filename) {
   
   myFile = SD.open(filename, FILE_WRITE); // F_APPEND
   if (myFile) {
@@ -249,12 +285,14 @@ bool writeSD(const char* filename, const String msg) {
     myFile.close();
     Serial.println("Message écrit sur la carte SD");
     return true;
-  } 
+  }
+    Serial.println("Impossible ouvrir le ficher 2");
+    isSDConnected=false;
   return false;
 }
 
 
-String readSD(const char* filename, int readRow, bool readAndDelete) {
+String readSD(bool readAndDelete, int readRow,const char* filename) {
   // Ouverture du fichier en mode lecture
   myFile = SD.open(filename);
   String result = "";
@@ -270,7 +308,7 @@ String readSD(const char* filename, int readRow, bool readAndDelete) {
       }
       result.remove(result.length() - 1);
       myFile.close();
-  }else {
+    }else {
     int i=0;
     while (myFile.available())
     {  
@@ -285,10 +323,11 @@ String readSD(const char* filename, int readRow, bool readAndDelete) {
     }
     if (elseCara.length() > 0 && elseCara[elseCara.length() - 1] == '\n') {
         elseCara.remove(elseCara.length() - 1);
+      }
     }
-  }
   myFile.close();
   } else {
+    isdataInBufferSD=false;
     return "";
   }
 
@@ -304,7 +343,32 @@ String readSD(const char* filename, int readRow, bool readAndDelete) {
       }
     }else{
       SD.remove(const_cast<char*>(filename));
+      isdataInBufferSD=false;
     }
   }
   return result;
+}
+
+bool checkSD()
+{
+ 
+  
+  ext::File temp=  SD.open("connect.txt", FILE_WRITE); 
+  delay(10);
+  if (temp) {
+    myFile.println("");
+    myFile.close();
+    SD.remove("connect.txt");
+    isSDConnected=true;
+    Serial.println("Carte SD OK");
+    return true;
+  }
+  isSDConnected=false;
+  SD.end();
+  Serial.println("Carte SD NOK");
+  return false;
+
+
+
+
 }
