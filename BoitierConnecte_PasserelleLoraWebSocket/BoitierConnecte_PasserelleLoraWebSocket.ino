@@ -26,7 +26,7 @@ bool ActivateSD=false;
 
 #define Wifi_Output 0
 #define Serial_Output 1
-bool OutputMode = Wifi_Output;
+bool OutputMode = Serial_Output;
 
 
 /*          WIFI            */
@@ -216,7 +216,12 @@ void sendWebSocketSerialMessage(JsonDocument msg)
 {
   String jsonString;
   serializeJson(msg, jsonString);
-  Serial.println(jsonString);
+
+  if(debugMode)
+  {
+    Serial.println(jsonString);
+  }
+  
 
   if(OutputMode== Wifi_Output)
   {
@@ -232,6 +237,9 @@ void sendWebSocketSerialMessage(JsonDocument msg)
         isdataInBufferSD=true;
       }
     }
+  }else if(OutputMode== Serial_Output)
+  {
+    Serial.println(jsonString);
   }
 
 
