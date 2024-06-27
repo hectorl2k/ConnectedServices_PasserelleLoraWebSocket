@@ -21,11 +21,12 @@ bool isdataInBufferSD =false;
 elapsedMillis timout_SD;
 
 bool debugMode = false;
+bool ActivateSD=false;
 
 
 #define Wifi_Output 0
 #define Serial_Output 1
-bool OutputMode = Serial_Output;
+bool OutputMode = Wifi_Output;
 
 
 /*          WIFI            */
@@ -66,7 +67,11 @@ void setup()
   {
     setupWifi();
     setupWebSocket();
-    setupSD();
+    if(ActivateSD)
+    {
+      setupSD();
+    }
+    
   }
   
 
@@ -81,8 +86,11 @@ void loop()
   {
     webSocket.loop();               // Ecoute Message WebSocket
   }
+  if(ActivateSD)
+  {
+    SD_CleanBuffer();               // Check si info dans la carte SD, si oui on vide
+  }
   
-  SD_CleanBuffer();               // Check si info dans la carte SD, si oui on vide
 
   sendSerialToLora();             // Ecoute port série et envoie en Lora
    
@@ -129,13 +137,22 @@ void LoraLoop()
 void setupWifi()
 {
   WiFi.begin(ssid, password);
-  Serial.println("Connecting");
+  if(debugMode)
+  {
+    Serial.println("Connecting");
+  }
   while(WiFi.status() != WL_CONNECTED) {										// verification de la connection WIFI
   delay(500);
-  Serial.print(".");
+  if(debugMode)
+    {
+    Serial.print(".");
+    }
   }
-  Serial.print("\nConnected to WiFi network with IP Address: ");
-  Serial.println(WiFi.localIP());
+  if(debugMode)
+  {
+    Serial.print("\nConnected to WiFi network with IP Address: ");
+    Serial.println(WiFi.localIP());
+  }
 }
 
 
@@ -189,7 +206,7 @@ void setupWebSocket()
   webSocket.onEvent(onWebSocketEvent);
   webSocket.setReconnectInterval(5000);
 
-  if(isWebSocketConnected)
+  if(isWebSocketConnected && debugMode)
     {
       Serial.println("WebSocket connected.");
     }
@@ -209,7 +226,7 @@ void sendWebSocketSerialMessage(JsonDocument msg)
     {
       webSocket.sendTXT(jsonString);
     }else{                     
-      if(isSDConnected)                // Reesaye de se reconnecter a SD
+      if(isSDConnected && ActivateSD)                // Reesaye de se reconnecter a SD
       {
         writeSD(jsonString);
         isdataInBufferSD=true;
@@ -226,20 +243,36 @@ void sendWebSocketSerialMessage(JsonDocument msg)
 void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
     case WStype_DISCONNECTED:
-      Serial.println("Disconnected from WebSocket.");
+    
+      if(debugMode)
+      {
+        Serial.println("Disconnected from WebSocket.");
+      }
       delay(100);
       isWebSocketConnected = false; // Mettre à false en cas de déconnexion
       break;
     case WStype_CONNECTED:
-      Serial.println("Connected to WebSocket.");
+      if(debugMode)
+      {
+        Serial.println("Connected to WebSocket.");
+      }
+      
       isWebSocketConnected = true; // Mettre à true lors de la connexion
       break;
     case WStype_TEXT:
-      Serial.printf("Received message: %s\n", payload);
+
+    if(debugMode)
+      {
+        Serial.printf("Received message: %s\n", payload);
+      }  
       sendBoitier(String(reinterpret_cast<char*>(payload)));
       break;
     case WStype_ERROR:
-      Serial.println("WebSocket Error.");
+       if(debugMode)
+      {
+        Serial.println("WebSocket Error.");
+      }  
+      
       isWebSocketConnected = false; // Mettre à false en cas d'erreur
       break;
   }}
@@ -311,7 +344,7 @@ void SD_CleanBuffer()         // A finir
   {
     if(debugMode)
     {
-    Serial.println("On vide carte SD");
+      Serial.println("On vide carte SD");
     }
     do{
       JsonDocument jsonSend;
@@ -425,7 +458,7 @@ bool checkSD()
     isSDConnected=true;
     if(debugMode)
     {
-    Serial.println("Carte SD OK");
+      Serial.println("Carte SD OK");
     }
     return true;
   }
@@ -436,8 +469,6 @@ bool checkSD()
   Serial.println("Carte SD NOK");
   }
   return false;
-
-
 
 
 }
